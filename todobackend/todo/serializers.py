@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from .models import Post
+from taggit.serializers import TagListSerializerField, TaggitSerializer
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
@@ -58,13 +59,14 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({"new_password": "New password fields didn't match."})
         return attrs
 
-class PostSerializer(serializers.ModelSerializer):
+class PostSerializer(TaggitSerializer, serializers.ModelSerializer):
     author_username = serializers.ReadOnlyField(source='author.username')
     is_favorited = serializers.SerializerMethodField()
+    tags = TagListSerializerField(required=False)
 
     class Meta:
         model = Post
-        fields = ('id', 'title', 'body', 'is_public', 'author', 'author_username', 'created_at', 'updated_at', 'favorited_by', 'is_favorited')
+        fields = ('id', 'title', 'body', 'is_public', 'author', 'author_username', 'created_at', 'updated_at', 'favorited_by', 'is_favorited', 'tags')
         read_only_fields = ('author', 'favorited_by',) # Author should be set automatically based on the logged-in user
 
     def get_is_favorited(self, obj):
@@ -77,3 +79,8 @@ class PostSerializer(serializers.ModelSerializer):
         # Set author to the current logged-in user during creation
         validated_data['author'] = self.context['request'].user
         return super().create(validated_data)
+
+    def validate_tags(self, value):
+        if len(value) > 5:
+            raise serializers.ValidationError("A post can have at most 5 tags.")
+        return value
