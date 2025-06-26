@@ -149,3 +149,93 @@ class PostTests(APITestCase):
         for post_data in response.data:
             if post_data['id'] == self.post_user2.id:
                 self.assertFalse(post_data['is_favorited'])
+
+class PostTaggingTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpassword')
+        # self.client.login(username='testuser', password='testpassword') # Not needed for API tests if using force_authenticate or tokens
+        self.client.force_authenticate(user=self.user)
+        self.post_data = {'title': 'Test Post', 'body': 'This is a test post.'}
+        # Ensure post-list and post-detail URLs are available; depends on router registration in urls.py
+        # Assuming they are registered with basename 'post' for a ViewSet
+
+    def test_create_post_with_tags(self):
+        data = {**self.post_data, 'tags': ['tag1', 'tag2']}
+        response = self.client.post(reverse('post-list'), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        post = Post.objects.get(pk=response.data['id'])
+        self.assertEqual(post.tags.count(), 2)
+        self.assertIn('tag1', [tag.name for tag in post.tags.all()])
+
+    def test_update_post_with_tags(self):
+        post = Post.objects.create(author=self.user, **self.post_data)
+        post.tags.add('initial_tag')
+        data = {'title': 'Updated Post', 'body': 'Updated body.', 'tags': ['updated_tag1', 'updated_tag2']}
+        response = self.client.put(reverse('post-detail', kwargs={'pk': post.pk}), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        post.refresh_from_db()
+        self.assertEqual(post.tags.count(), 2)
+        self.assertIn('updated_tag1', [tag.name for tag in post.tags.all()])
+        self.assertNotIn('initial_tag', [tag.name for tag in post.tags.all()])
+
+    def test_retrieve_post_verifies_tags(self):
+        post = Post.objects.create(author=self.user, **self.post_data)
+        post.tags.add('tagA', 'tagB')
+        response = self.client.get(reverse('post-detail', kwargs={'pk': post.pk}), format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIn('tags', response.data)
+        self.assertEqual(len(response.data['tags']), 2)
+        self.assertIn('tagA', response.data['tags'])
+        self.assertIn('tagB', response.data['tags'])
+
+    def test_tag_limit_validation_on_create(self):
+        data = {**self.post_data, 'tags': ['1', '2', '3', '4', '5', '6']} # 6 tags
+        response = self.client.post(reverse('post-list'), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+        self.assertIn('tags', response.data)
+        # The exact error message might be a list if multiple errors, or string.
+        # And it might be nested if using DRF's default error formatting.
+        # For TaggitSerializerField, the error is usually a list of strings.
+        self.assertIn('A post can have at most 5 tags.', str(response.data['tags']))
+
+
+    def test_tag_limit_validation_on_update(self):
+        post = Post.objects.create(author=self.user, **self.post_data)
+        data = {'title': 'Updated Post', 'tags': ['1', '2', '3', '4', '5', '6']} # 6 tags
+        response = self.client.put(reverse('post-detail', kwargs={'pk': post.pk}), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+        self.assertIn('tags', response.data)
+        self.assertIn('A post can have at most 5 tags.', str(response.data['tags']))
+
+
+    def test_create_post_with_max_tags(self):
+        data = {**self.post_data, 'tags': ['tag1', 'tag2', 'tag3', 'tag4', 'tag5']}
+        response = self.client.post(reverse('post-list'), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        post = Post.objects.get(pk=response.data['id'])
+        self.assertEqual(post.tags.count(), 5)
+
+    def test_create_post_with_no_tags(self):
+        # Ensure 'tags' field is not included or is empty list
+        data_no_tags = self.post_data.copy()
+        # data_no_tags.pop('tags', None) # Or send {'tags': []}
+        response = self.client.post(reverse('post-list'), data_no_tags, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        post = Post.objects.get(pk=response.data['id'])
+        self.assertEqual(post.tags.count(), 0)
+        # Also test with explicit empty list for tags
+        data_empty_tags = {**self.post_data, 'tags': []}
+        response_empty_tags = self.client.post(reverse('post-list'), data_empty_tags, format='json')
+        self.assertEqual(response_empty_tags.status_code, status.HTTP_201_CREATED, response_empty_tags.data)
+        post_empty_tags = Post.objects.get(pk=response_empty_tags.data['id'])
+        self.assertEqual(post_empty_tags.tags.count(), 0)
+
+
+    def test_update_post_to_remove_all_tags(self):
+        post = Post.objects.create(author=self.user, **self.post_data)
+        post.tags.add('tag1', 'tag2')
+        data = {'title': 'Updated Post', 'body': 'Updated body.', 'tags': []}
+        response = self.client.put(reverse('post-detail', kwargs={'pk': post.pk}), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        post.refresh_from_db()
+        self.assertEqual(post.tags.count(), 0)
