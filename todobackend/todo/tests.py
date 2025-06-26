@@ -239,3 +239,127 @@ class PostTaggingTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         post.refresh_from_db()
         self.assertEqual(post.tags.count(), 0)
+
+from .models import Comment # Import Comment model
+from rest_framework.test import APIClient # Ensure APIClient is imported if not already at top
+
+class CommentAPITests(APITestCase):
+    def setUp(self):
+        # Create users
+        self.user1 = User.objects.create_user(username='commentuser1', password='password123')
+        self.user2 = User.objects.create_user(username='commentuser2', password='password123')
+
+        # Create a post by user1
+        self.post_for_comments = Post.objects.create(author=self.user1, title='Post for Comments', body='This is a test post for commenting.', is_public=True)
+
+        # Authenticate client for user1
+        self.client = APIClient() # Use a fresh client for these tests
+        self.client.force_authenticate(user=self.user1)
+
+    def test_create_comment_authenticated(self):
+        """
+        Ensure authenticated user can create a comment on a post.
+        """
+        url = reverse('post-comments-list', kwargs={'post_pk': self.post_for_comments.pk})
+        data = {'text': 'This is a test comment.'}
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(Comment.objects.count(), 1)
+        comment = Comment.objects.get()
+        self.assertEqual(comment.text, 'This is a test comment.')
+        self.assertEqual(comment.author, self.user1)
+        self.assertEqual(comment.post, self.post_for_comments)
+
+    def test_create_comment_unauthenticated(self):
+        """
+        Ensure unauthenticated user cannot create a comment.
+        """
+        unauth_client = APIClient() # Fresh unauthenticated client
+        url = reverse('post-comments-list', kwargs={'post_pk': self.post_for_comments.pk})
+        data = {'text': 'Another test comment.'}
+        response = unauth_client.post(url, data, format='json')
+        # Based on CommentViewSet permissions (create = IsAuthenticated)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED, response.data)
+        self.assertEqual(Comment.objects.count(), 0)
+
+    def test_list_comments_for_post(self):
+        """
+        Ensure anyone can list comments for a specific post.
+        """
+        Comment.objects.create(post=self.post_for_comments, author=self.user1, text='Comment 1 by user1')
+        Comment.objects.create(post=self.post_for_comments, author=self.user2, text='Comment 2 by user2')
+
+        unauth_client = APIClient()
+        url = reverse('post-comments-list', kwargs={'post_pk': self.post_for_comments.pk})
+        response = unauth_client.get(url, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(len(response.data), 2)
+        # Order might not be guaranteed unless specified in ViewSet ordering
+        texts = {item['text'] for item in response.data}
+        self.assertIn('Comment 1 by user1', texts)
+        self.assertIn('Comment 2 by user2', texts)
+
+
+    def test_retrieve_comment(self):
+        """
+        Ensure anyone can retrieve a specific comment.
+        """
+        comment = Comment.objects.create(post=self.post_for_comments, author=self.user1, text='A specific comment to retrieve')
+        url = reverse('post-comments-detail', kwargs={'post_pk': self.post_for_comments.pk, 'pk': comment.pk})
+
+        unauth_client = APIClient()
+        response = unauth_client.get(url, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['text'], 'A specific comment to retrieve')
+
+    def test_update_comment_author(self):
+        """
+        Ensure the author of a comment can update it.
+        """
+        comment = Comment.objects.create(post=self.post_for_comments, author=self.user1, text='Original comment text by user1')
+        url = reverse('post-comments-detail', kwargs={'post_pk': self.post_for_comments.pk, 'pk': comment.pk})
+        data = {'text': 'Updated comment text by user1'}
+        response = self.client.put(url, data, format='json') # user1 is authenticated
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        comment.refresh_from_db()
+        self.assertEqual(comment.text, 'Updated comment text by user1')
+
+    def test_update_comment_non_author(self):
+        """
+        Ensure a non-author cannot update a comment.
+        """
+        comment = Comment.objects.create(post=self.post_for_comments, author=self.user1, text='Original comment by user1 for non-author test')
+
+        non_author_client = APIClient()
+        non_author_client.force_authenticate(user=self.user2) # Authenticate as user2
+
+        url = reverse('post-comments-detail', kwargs={'post_pk': self.post_for_comments.pk, 'pk': comment.pk})
+        data = {'text': 'Attempted update by non-author (user2)'}
+        response = non_author_client.put(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, response.data)
+        comment.refresh_from_db()
+        self.assertEqual(comment.text, 'Original comment by user1 for non-author test')
+
+    def test_delete_comment_author(self):
+        """
+        Ensure the author of a comment can delete it.
+        """
+        comment = Comment.objects.create(post=self.post_for_comments, author=self.user1, text='Comment to be deleted by user1')
+        url = reverse('post-comments-detail', kwargs={'post_pk': self.post_for_comments.pk, 'pk': comment.pk})
+        response = self.client.delete(url) # user1 is authenticated
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT, response.data)
+        self.assertEqual(Comment.objects.count(), 0)
+
+    def test_delete_comment_non_author(self):
+        """
+        Ensure a non-author cannot delete a comment.
+        """
+        comment = Comment.objects.create(post=self.post_for_comments, author=self.user1, text='Comment to protect from non-author deletion')
+
+        non_author_client = APIClient()
+        non_author_client.force_authenticate(user=self.user2) # Authenticate as user2
+
+        url = reverse('post-comments-detail', kwargs={'post_pk': self.post_for_comments.pk, 'pk': comment.pk})
+        response = non_author_client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, response.data)
+        self.assertEqual(Comment.objects.count(), 1)

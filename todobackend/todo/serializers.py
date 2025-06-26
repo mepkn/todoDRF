@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from .models import Post
+from .models import Post, Comment # Import Comment model
 from taggit.serializers import TagListSerializerField, TaggitSerializer
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -84,3 +84,18 @@ class PostSerializer(TaggitSerializer, serializers.ModelSerializer):
         if len(value) > 5:
             raise serializers.ValidationError("A post can have at most 5 tags.")
         return value
+
+class CommentSerializer(serializers.ModelSerializer):
+    author_username = serializers.ReadOnlyField(source='author.username')
+    post_id = serializers.ReadOnlyField(source='post.id')
+
+    class Meta:
+        model = Comment
+        fields = ('id', 'post_id', 'author', 'author_username', 'text', 'created_at')
+        read_only_fields = ('author',) # Author should be set automatically based on the logged-in user
+
+    def create(self, validated_data):
+        # Set author to the current logged-in user during creation
+        validated_data['author'] = self.context['request'].user
+        # Post will be set in the view based on the URL
+        return super().create(validated_data)
