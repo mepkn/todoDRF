@@ -164,3 +164,49 @@ class IsAuthorOrReadOnly(BasePermission):
 
         # Write permissions are only allowed to the author of the post.
         return obj.author == request.user
+
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.views import APIView
+
+class LogoutView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        try:
+            refresh_token = request.data["refresh_token"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response(status=status.HTTP_205_RESET_CONTENT)
+        except Exception as e:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+class FavoritePostView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, pk):
+        try:
+            post = Post.objects.get(pk=pk)
+            if post.favorited_by.filter(pk=request.user.pk).exists():
+                post.favorited_by.remove(request.user)
+                return Response({"message": "Post unfavorited successfully."}, status=status.HTTP_200_OK)
+            else:
+                post.favorited_by.add(request.user)
+                return Response({"message": "Post favorited successfully."}, status=status.HTTP_200_OK)
+        except Post.DoesNotExist:
+            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+class UserPostsView(generics.ListAPIView):
+    serializer_class = PostSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return Post.objects.filter(author=self.request.user)
+
+class FavoritePostsView(generics.ListAPIView):
+    serializer_class = PostSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return self.request.user.favorite_posts.all()

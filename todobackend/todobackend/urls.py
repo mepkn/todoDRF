@@ -21,10 +21,12 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
+from todo.views import LogoutView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/logout/', LogoutView.as_view(), name='logout'),
     path('api/user/', include('todo.urls')), # Include todo app urls
 ]

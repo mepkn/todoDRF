@@ -60,11 +60,18 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 class PostSerializer(serializers.ModelSerializer):
     author_username = serializers.ReadOnlyField(source='author.username')
+    is_favorited = serializers.SerializerMethodField()
 
     class Meta:
         model = Post
-        fields = ('id', 'title', 'body', 'is_public', 'author', 'author_username', 'created_at', 'updated_at')
-        read_only_fields = ('author',) # Author should be set automatically based on the logged-in user
+        fields = ('id', 'title', 'body', 'is_public', 'author', 'author_username', 'created_at', 'updated_at', 'favorited_by', 'is_favorited')
+        read_only_fields = ('author', 'favorited_by',) # Author should be set automatically based on the logged-in user
+
+    def get_is_favorited(self, obj):
+        user = self.context['request'].user
+        if user.is_authenticated:
+            return obj.favorited_by.filter(pk=user.pk).exists()
+        return False
 
     def create(self, validated_data):
         # Set author to the current logged-in user during creation

@@ -8,6 +8,7 @@ class Post(models.Model):
     is_public = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    favorited_by = models.ManyToManyField(User, related_name='favorite_posts', blank=True)
 
     def __str__(self):
         return self.title
