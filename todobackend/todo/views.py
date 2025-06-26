@@ -210,3 +210,45 @@ class FavoritePostsView(generics.ListAPIView):
 
     def get_queryset(self):
         return self.request.user.favorite_posts.all()
+
+from .models import Comment
+from .serializers import CommentSerializer
+
+class CommentViewSet(viewsets.ModelViewSet):
+    queryset = Comment.objects.all()
+    serializer_class = CommentSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        # Filter comments by the post_pk URL parameter
+        post_pk = self.kwargs.get('post_pk')
+        if post_pk:
+            return Comment.objects.filter(post_id=post_pk)
+        return Comment.objects.none() # Or handle as an error / return all comments if appropriate
+
+    def perform_create(self, serializer):
+        post_pk = self.kwargs.get('post_pk')
+        post = Post.objects.get(pk=post_pk)
+        serializer.save(author=self.request.user, post=post)
+
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        """
+        if self.action in ['update', 'partial_update', 'destroy']:
+            # Only allow authors to edit or delete their comments
+            self.permission_classes = [IsAuthenticated, IsAuthorOfCommentOrReadOnly]
+        elif self.action == 'create':
+            self.permission_classes = [IsAuthenticated]
+        else: # list, retrieve
+            self.permission_classes = [AllowAny] # Allow anyone to view comments
+        return super().get_permissions()
+
+class IsAuthorOfCommentOrReadOnly(BasePermission):
+    """
+    Custom permission to only allow authors of a comment to edit or delete it.
+    """
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        return obj.author == request.user
